@@ -1,6 +1,6 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, openSync, closeSync} from 'node:fs';
 import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {join, win32} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn, spawnSync} from 'node:child_process';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -33,7 +33,7 @@ export function serviceDefinition(record, {home = homedir(), user = '', config =
   };
   if (record.backend === 'task-scheduler') return {
     path: join(locations().config, 'service.xml'),
-    text: `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>DeepSeek subagents for Codex</Description></RegistrationInfo><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(user)}</UserId></LogonTrigger></Triggers><Principals><Principal id="Author"><UserId>${xml(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure></Settings><Actions Context="Author"><Exec><Command>${xml(record.node)}</Command><Arguments>${xml(args.map(windowsQuote).join(' '))}</Arguments><WorkingDirectory>${xml(record.root)}</WorkingDirectory></Exec></Actions></Task>\n`,
+    text: `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>DeepSeek subagents for Codex</Description></RegistrationInfo><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(user)}</UserId></LogonTrigger></Triggers><Principals><Principal id="Author"><UserId>${xml(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure></Settings><Actions Context="Author"><Exec><Command>${xml(win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe'))}</Command><Arguments>${xml(['//B', '//NoLogo', join(record.root, 'scripts/windows-service.js'), record.root, record.node, ...args].map(windowsQuote).join(' '))}</Arguments><WorkingDirectory>${xml(record.root)}</WorkingDirectory></Exec></Actions></Task>\n`,
   };
   return null;
 }

@@ -2,6 +2,7 @@
 
 ## 0.8.0
 
+- Hide the Windows login-service console while preserving task supervision and child exit status. Hide DSH execution consoles as well.
 - Connect Codex directly to one authenticated loopback HTTP MCP service. Restoring idle chats no longer starts a Node proxy for each chat.
 - Release per-request MCP objects and disconnected wait observers; preserve accepted background tasks independently of client connections.
 - Keep the endpoint stable across service restarts. Legacy stdio clients use a lightweight forwarding module and exit on EOF or disconnection.
