@@ -26,8 +26,11 @@ export async function codexCallback({threadId,output,endpoint,check=false},{time
   const configured=connection();
   const remote=endpoint || process.env.DSH_CODEX_REMOTE || configured?.endpoint;
   const token=process.env.DSH_CODEX_TOKEN || configured?.token;
-  const socket=process.platform==='win32'&&!remote
-    ? openNativeCodexSocket()
+  // Node's Windows IPC path is not a Unix-domain socket transport. Route both
+  // the default and an explicitly supplied Unix socket through the official
+  // proxy. This only connects; it never starts or installs a shared server.
+  const socket=process.platform==='win32'&&(!remote||remote.startsWith('unix://'))
+    ? openNativeCodexSocket({socketPath:remote?.slice('unix://'.length)||undefined})
     : new WebSocket(callbackEndpoint(remote),token?{headers:{Authorization:'Bearer '+token}}:{});
   let timer;
   try {

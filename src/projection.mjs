@@ -42,6 +42,7 @@ export function receipt(value, operation) {
   const id = value.id ?? value.agent_id;
   const out={agent_id: id, id, operation, status: value.status, accepted: true};
   if(value.name) out.name=value.name;
+  Object.assign(out, workspace(value));
   Object.assign(out, context(value));
   if(value.delivery) out.delivery=sanitize(value.delivery);
   if(value.request_id) out.request_id=value.request_id;
@@ -54,6 +55,11 @@ function context(value) {
   return limit ? {context_tokens: value.context_tokens, context_limit_tokens: limit} : {context_tokens: value.context_tokens};
 }
 
+function workspace(value) {
+  if (!value.isolation) return value.workspace_mode==='shared'?{cwd:value.cwd,source_cwd:value.source_cwd,workspace_mode:'shared',file_isolation:false}:{};
+  return {cwd:value.cwd,source_cwd:value.source_cwd,isolation:{mode:value.isolation.mode,worktree_root:value.isolation.worktree_root,base_commit:value.isolation.base_commit,source_updates:'not_automatically_imported'}};
+}
+
 export function status(value, {full = false} = {}) {
   if (full) return sanitize({...value, agent_id: value.id}, {full: true});
   const out = {agent_id: value.id, id: value.id, status: value.status};
@@ -61,6 +67,7 @@ export function status(value, {full = false} = {}) {
     if (value[key] !== undefined && value[key] !== null && value[key] !== '') out[key] = sanitize(value[key]);
   }
   Object.assign(out, context(value));
+  Object.assign(out, workspace(value));
   if (value.status === 'running' && value.last_event) out.progress = value.last_event;
   return out;
 }

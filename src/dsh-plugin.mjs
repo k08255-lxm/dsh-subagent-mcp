@@ -2,12 +2,15 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePreset } from './preset-compat.mjs';
 const requireDsh = createRequire(process.env.DSH_CLI);
 const pkg = name => import(pathToFileURL(requireDsh.resolve(name)).href);
 const { HarnessSdkJsonRpcServer } = await pkg('@deepseek-ai/dsh-sdk-jsonrpc-server');
 const { JsonRpcLineTransport } = await pkg('@deepseek-ai/dsh-sdk-protocol');
+const { createUserMessage } = await pkg('@deepseek-ai/dsh-llm');
 export const name = 'codex-subagent-rpc';
 export const inject = ['agents', 'sessions', 'permissionPresets', 'sdkAppStartup', 'loader', 'workspaceRegistry', 'agentPresets', 'sessionQuery', 'sessionProjections', 'sessionTitle'];
+if (process.env.DSH_DESKTOP_EXECUTABLE) inject.push('workingDirectory');
 
 export function apply(ctx) {
   // Bridge sessions hang under one virtual parent per workspace instead of
@@ -27,7 +30,10 @@ export function apply(ctx) {
       // mount point visible and lets it explain itself. Message-producing
       // events must declare how they enter the surface.
       agent.session.append('turn/start',{turn:1});
-      agent.session.append('user/message',{content:[{type:'text',text:parentNote}]},{surfaceOp:'append'});
+      agent.session.append('user/message',createUserMessage({
+        content:[{type:'text',text:parentNote}],
+        source:{kind:'dsh-subagent-mount',form:'notice'},
+      }),{surfaceOp:'append'});
       agent.session.append('turn/end',{turn:1,reason:{kind:'completed'}});
       await ctx.sessions.flush(agent.session);
     }
@@ -39,7 +45,7 @@ export function apply(ctx) {
   };
   const transport = new JsonRpcLineTransport(process.stdin, process.stdout);
   class Bridge extends HarnessSdkJsonRpcServer {
-    async createSession(id) {
+    async createSession(id, resume = false) {
       const agentOptions = {
         provider: this.provider, model: this.model, reasoningEffort: this.reasoningEffort,
       };
@@ -49,11 +55,11 @@ export function apply(ctx) {
         if (this.preset) await ctx.agentPresets.mount(agentCtx, this.preset);
       };
       let handle;
-      if (this.resume) {
+      if (this.resumeRequested || resume) {
         handle = await ctx.agents.resume({resumeSessionId: id, agentOptions, setup});
       } else {
         // Resolve before storing a session so invalid presets create no history.
-        if (this.preset) await ctx.agentPresets.resolveMountable(this.preset);
+        if (this.preset) await resolvePreset(ctx.agentPresets, this.preset);
         handle = await ctx.agents.create({sessionId: id, agentOptions,
           meta: {cwd: this.cwd, ...(this.preset ? {agentPreset: this.preset} : {}),
             ...(this.parent ? {origin: 'subagent', parentSession: this.parent, delegationDepth: 1} : {})},
@@ -93,9 +99,18 @@ export function apply(ctx) {
       transport.notify('session.text', {sessionId: String(agent.session.id), chunk: frame.chunk});
   });
   transport.onRequest(async (method, params) => {
+    if (method === 'bridge/compatibility') {
+      await ctx.get('loader')?.await();
+      const presets = [];
+      for (const id of ['standard', 'minimal']) {
+        await resolvePreset(ctx.agentPresets, id);
+        presets.push(id);
+      }
+      return {presets, modelCalled: false};
+    }
     if (method === 'initialize') {
       await ctx.get('loader')?.await();
-      bridge.resume = params.resume === true;
+      bridge.resumeRequested = params.resume === true;
       bridge.preset = params.preset;
       bridge.permission = params.permission ?? 'workspace-write';
       bridge.title = params.title;

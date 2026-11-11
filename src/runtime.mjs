@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {EventEmitter} from 'node:events';
 import {providerEnvironment} from './platform.mjs';
+import {runtimeLaunch} from './runtime-launch.mjs';
 
 export class Runtime extends EventEmitter {
   constructor(agent, config) {
@@ -9,8 +10,9 @@ export class Runtime extends EventEmitter {
     this.pending = new Map();
     this.seq = 0;
     this.stderr = '';
-    this.child = spawn(process.execPath, [config.cli, '--profile', 'codex-subagent', '--patch', agent.preset ? config.patch : config.legacyPatch], {
-      cwd: agent.cwd, env: {...process.env, ...providerEnvironment(), ...config.env, DSH_CLI: config.cli}, stdio: ['pipe','pipe','pipe'], windowsHide: true,
+    const launch = runtimeLaunch(config, agent, {...process.env, ...providerEnvironment(), ...config.env});
+    this.child = spawn(launch.command, launch.args, {
+      cwd: agent.cwd, env: launch.env, stdio: ['pipe','pipe','pipe'], windowsHide: true,
     });
     this.child.stderr.on('data', d => {this.stderr = (this.stderr + d).slice(-8000);});
     createInterface({input:this.child.stdout}).on('line', line => {

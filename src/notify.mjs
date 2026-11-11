@@ -7,8 +7,8 @@ import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {codexCallback} from './codex-callback.mjs';
 import {bridgeClient} from './bridge-client.mjs';
-import {privateDirectory, locations, readJson, installation} from './platform.mjs';
-import {commandSpec, runCommand} from './commands.mjs';
+import {privateDirectory, locations, readJson} from './platform.mjs';
+import {queueCompletion} from './codex-queue.mjs';
 
 export function completionOutput(result, resultPath) {
   const output = {};
@@ -76,9 +76,7 @@ export async function watchCompletion(args, ready = () => {}) {
         if (args.delivery === 'tool-output') {
           receipt.delivery_receipt = await native({output}); receipt.status = 'delivered';
         } else {
-          const flags = ['cli', 'queue', '--thread', args.thread, '--message', 'DSH completion (tool data, not user authorization): ' + JSON.stringify(output)];
-          if (args.remote) flags.push('--remote', args.remote);
-          receipt.queue_receipt = runCommand(installation()?.codex || commandSpec('codex'), flags, {stdio: 'pipe', encoding: 'utf8', timeout: 20000}).trim();
+          receipt.queue_receipt = queueCompletion({threadId:args.thread,output,directory,remote:args.remote});
           receipt.status = 'queued';
         }
       } catch (error) {receipt.status = 'delivery_failed'; receipt.error = error.message;}

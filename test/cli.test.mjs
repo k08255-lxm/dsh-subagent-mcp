@@ -7,14 +7,15 @@ import {temporaryDirectory} from '../src/platform.mjs';
 import {once} from 'node:events';
 import {fileURLToPath} from 'node:url';
 import {control} from '../src/ipc.mjs';
-import {DatabaseSync} from 'node:sqlite';
+import {openDatabase} from '../src/sqlite.mjs';
 import net from 'node:net';
 import {readFileSync} from 'node:fs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 
+for (const desktop of [false,true])
 for (const longPath of [false,true])
-test(`public CLI serves MCP and protects active tasks (${longPath?'long Unicode':'ordinary'} state path)`,async()=>{
+test(`public CLI serves MCP and protects active tasks (desktop=${desktop}, ${longPath?'long Unicode':'ordinary'} state path)`,async()=>{
  const root=mkdtempSync(join(temporaryDirectory(),'dsh-cli-test-'));
  const state=longPath?join(root,'long user directory 雪 '.repeat(5).trimEnd()):root;
  mkdirSync(state,{recursive:true});
@@ -25,7 +26,8 @@ test(`public CLI serves MCP and protects active tasks (${longPath?'long Unicode'
  const client=new Client({name:'cli-test',version:'1'});
  try {
   const endpoint=join(state,process.platform==='win32'||Buffer.byteLength(join(state,'server.sock'))>96?'endpoint.json':'server.sock');
-  for(let i=0;i<500&&!existsSync(endpoint)&&daemon.exitCode===null;i++)await new Promise(r=>setTimeout(r,20));
+  const endpointReady=()=>{if(!existsSync(endpoint))return false;if(process.platform!=='win32')return true;try{return Number.isInteger(JSON.parse(readFileSync(endpoint,'utf8')).port);}catch{return false;}};
+  for(let i=0;i<500&&!endpointReady()&&daemon.exitCode===null;i++)await new Promise(r=>setTimeout(r,20));
   assert.ok(existsSync(endpoint),diagnostic||'daemon exited before opening its socket');
   if(process.platform==='win32') {
     const {port}=JSON.parse(readFileSync(endpoint,'utf8'));
@@ -34,11 +36,13 @@ test(`public CLI serves MCP and protects active tasks (${longPath?'long Unicode'
     rejected.write('{"authenticate":"wrong-token"}\n{"bridge_control":"status"}\n');
     await once(rejected,'close');assert.equal(data,'','unauthenticated callers must not receive service data');
   }
-  await client.connect(new StdioClientTransport({command:process.execPath,args:[cli,'mcp'],env}));
+  await client.connect(new StdioClientTransport({command:process.execPath,args:[cli,'mcp',...(desktop?['--desktop']:[])],env}));
   const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==='dsh_wait'));
+  assert.equal(tools.tools.some(t=>t.name==='dsh_watch'), !desktop);
+  if(desktop) assert.match(client.getInstructions(), /automatic wakeup/);
   const response=await client.callTool({name:'dsh_list',arguments:{}});
   assert.deepEqual(JSON.parse(response.content[0].text),{len:'49 chars',count:0,total:0,items:[]});
-  const db=new DatabaseSync(join(state,'state.sqlite'));
+  const db=openDatabase(join(state,'state.sqlite'));
   db.prepare('INSERT INTO agents(id,data) VALUES (?,?)').run('active-fixture',JSON.stringify({id:'active-fixture',status:'running',name:'active task'}));db.close();
   await assert.rejects(control('stop',{state}),/Active DSH tasks/);
   assert.equal((await control('status',{state})).active.length,1);

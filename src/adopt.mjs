@@ -8,7 +8,7 @@ import {zstdCompressSync, zstdDecompressSync} from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
-import {DatabaseSync} from 'node:sqlite';
+import {openDatabase} from './sqlite.mjs';
 import {randomUUID} from 'node:crypto';
 import {Runtime} from './runtime.mjs';
 import {runtimeConfig, stateDirectory} from './config.mjs';
@@ -95,7 +95,7 @@ export async function adopt({state = stateDirectory(), report = console.log} = {
   if (existsSync(join(state, 'server.sock')) && !busy(join(state, 'server.sock')))
     report('Note: the service socket is present. Stop dsh-subagent-mcp before adopting, or live sessions are skipped.');
   const config = runtimeConfig(state);
-  const db = new DatabaseSync(config.database);
+  const db = openDatabase(config.database);
   const agents = db.prepare('SELECT data FROM agents').all().map(row => JSON.parse(row.data)).filter(agent => agent.cwd && !agent.external);
   const located = agents.map(agent => ({agent, found: locate(agent.id)})).filter(entry => entry.found);
   const parents = parentsFor(db, [...new Set(located.map(entry => entry.agent.cwd))]);

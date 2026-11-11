@@ -17,7 +17,28 @@ class Fake extends EventEmitter {
   }
 }
 const tick=()=>new Promise(r=>setImmediate(r));
+test('configured provider and model become defaults without overriding explicit routes',async t=>{
+  const {m,dir}=setup(t);
+  m.config.defaultProvider='configured-provider';m.config.defaultModel='configured-model';m.config.defaultEffort='high';
+  const a=await m.start({cwd:dir,task:'fixture'});
+  assert.equal(a.provider,'configured-provider');assert.equal(a.model,'configured-model');
+  assert.equal(a.effort,'high');
+  const b=await m.start({cwd:dir,task:'fixture',provider:'explicit-provider',model:'explicit-model',effort:'low'});
+  assert.equal(b.provider,'explicit-provider');assert.equal(b.model,'explicit-model');
+  assert.equal(b.effort,'low');
+});
 function setup(t){const dir=mkdtempSync(join(tmpdir(),'dsh-manager-test-'));const config={database:dir+'/db'};const m=new Manager(config,Fake);t.after(async()=>{await m.shutdown();rmSync(dir,{recursive:true});});return{m,dir,config};}
+
+test('desktop mount points are checked in the active DSH home despite cached seeded state',async t=>{
+  const {m,dir}=setup(t);m.config.revalidateParents=true;
+  const a={cwd:dir,preset:'minimal',provider:'fixture',model:'fixture',permission:'read-only'};
+  const parent=await m.ensureParent(a);
+  const before=Fake.all.length;
+  assert.equal(await m.ensureParent(a),parent);
+  const checks=Fake.all.slice(before).flatMap(rt=>rt.calls);
+  assert.equal(checks.filter(([method])=>method==='parent/seed').length,1);
+  assert.equal(checks.filter(([method])=>method==='session/prompt').length,0);
+});
 test('independent answers, progress cursors, and busy followups',async t=>{
   const{m,dir}=setup(t);const a=await m.start({cwd:dir,task:'A'}),b=await m.start({cwd:dir,task:'B'});await tick();
   await assert.rejects(m.followup(a.id,'conflicting'),/busy/);
@@ -120,11 +141,12 @@ test('cancelling a wait detaches the observer without cancelling the child',asyn
  assert.equal((await next).next_action,'respect_stop');
 });
 
-test('MCP wait response delivers completion and permits a dependent parent call',async t=>{
+for (const desktop of [false, true])
+test(`MCP wait response delivers completion and permits a dependent parent call (desktop=${desktop})`,async t=>{
  const {Client}=await import('@modelcontextprotocol/sdk/client/index.js');
  const {InMemoryTransport}=await import('@modelcontextprotocol/sdk/inMemory.js');
  const {makeServer}=await import('../src/server.mjs');
- const {m,dir}=setup(t);const server=makeServer(m),client=new Client({name:'parent',version:'1'});
+ const {m,dir}=setup(t);const server=makeServer(m,{desktop}),client=new Client({name:'parent',version:'1'});
  const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
  t.after(async()=>{await client.close();await server.close();});
  const call=async(name,args)=>{const r=await client.callTool({name,arguments:args});assert.equal(r.isError,undefined);return JSON.parse(r.content[0].text);};

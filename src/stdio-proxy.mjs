@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {locations,installation} from './platform.mjs';
 import {connectBridge} from './ipc.mjs';
 
-export async function stdioProxy() {
+export async function stdioProxy({desktop = false} = {}) {
   const state=locations().state;
     let socket;
     try {socket=await connectBridge(state);}
@@ -16,12 +16,13 @@ export async function stdioProxy() {
       socket=await connectBridge(state);
     }
     socket.on('error',e=>{console.error('DSH subagent service unavailable: '+e.message);process.exitCode=1;process.stdin.destroy();});
-    if(process.env.DSH_CODEX_CONNECTION) {
+    if(desktop || process.env.DSH_CODEX_CONNECTION) {
       const input=createInterface({input:process.stdin});
       input.on('line',line=>{
         try {
           const message=JSON.parse(line);
-          if(message.method==='tools/call')message.params._meta={...message.params._meta,dshConnection:process.env.DSH_CODEX_CONNECTION};
+          if(desktop && message.method==='initialize') message.params = {...message.params, _meta: {...message.params?._meta, dshClientProfile: 'desktop'}};
+          if(!desktop && message.method==='tools/call')message.params._meta={...message.params._meta,dshConnection:process.env.DSH_CODEX_CONNECTION};
           socket.write(JSON.stringify(message)+'\n');
         } catch {socket.destroy(new Error('Invalid MCP input'));}
       });

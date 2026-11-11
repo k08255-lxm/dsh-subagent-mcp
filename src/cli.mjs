@@ -28,7 +28,8 @@ Usage:
   dsh-subagent-mcp dsh [DSH arguments]
   dsh-subagent-mcp notify --agent AGENT_ID
   dsh-subagent-mcp adopt
-  dsh-subagent-mcp mcp                      MCP stdio transport
+  dsh-subagent-mcp desktop-config           Print desktop MCP TOML; does not change configuration
+  dsh-subagent-mcp mcp [--desktop]          MCP stdio transport
 
 Windows, Linux and macOS. Node.js 24+; no Python required.
 Setup installs missing DSH/Codex dependencies, a per-user background service,
@@ -75,7 +76,10 @@ Upgrades and ordinary stops refuse to interrupt active tasks.`);
     flags({});
     if (process.platform !== 'linux') throw new Error('Legacy session adoption requires Linux flock. Normal DSH sessions work on all supported platforms.');
     await (await import('./adopt.mjs')).adopt();
-  } else if (command === 'mcp') await (await import('./stdio-proxy.mjs')).stdioProxy();
+  } else if (command === 'desktop-config') {
+    flags({});
+    console.log((await import('./desktop.mjs')).desktopConfig());
+  } else if (command === 'mcp') await (await import('./stdio-proxy.mjs')).stdioProxy(flags({desktop: {type: 'boolean'}}));
   else if (command === '--daemon') await (await import('./server.mjs')).main();
   else throw new Error('Unknown command: ' + command + '. Run dsh-subagent-mcp --help.');
 } catch (error) {console.error(error.message); process.exitCode = 1;}

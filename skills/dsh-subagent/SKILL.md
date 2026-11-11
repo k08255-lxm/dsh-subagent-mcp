@@ -27,6 +27,17 @@ into the authorized parent work. Starting a child is not a completed handoff.
 Track its agent ID, objective, expected evidence, and the parent action that
 will follow completion. Preserve these across context compaction.
 
+### Codex desktop compatibility profile
+
+If the MCP server identifies itself as desktop compatibility mode and does not
+expose `dsh_watch`, use the standard MCP completion workflow below. Do not run
+`codex_notify`, probe another Codex daemon, or end the turn expecting a callback.
+This explicit profile takes precedence over the native callback workflow.
+Keep one `dsh_wait` pending after independent work. If the desktop client times
+out or disconnects, retain the agent ID and retrieve its result on reconnection;
+do not dispatch the same task again. A client-side timeout is not cancellation.
+This profile does not provide a native desktop agent panel or idle-parent wakeup.
+
 ### Codex: return native tool output
 
 After `dsh_start` or an accepted `dsh_followup`, call `dsh_watch` with that

@@ -1,5 +1,5 @@
 import {EventEmitter} from 'node:events';
-import {DatabaseSync} from 'node:sqlite';
+import {openDatabase} from './sqlite.mjs';
 import {randomUUID} from 'node:crypto';
 import {existsSync,statSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
@@ -7,6 +7,7 @@ import {Runtime} from './runtime.mjs';
 import {ExternalSessions} from './external-sessions.mjs';
 import {events as projectEvents} from './projection.mjs';
 import {contextLimitTokens} from './config.mjs';
+import {isolationEnabled, prepareWorkspace, assertWorkspaceOwner, validateAgentWorkspace, isolatedPrompt} from './workspace-isolation.mjs';
 
 const ACTIVE=['starting','running','interrupting'];
 // The session DSH Web shows in place of the individual bridge agents.
@@ -28,7 +29,7 @@ export class Manager extends EventEmitter {
   constructor(config, RuntimeClass = Runtime) {
     super();
     this.config = config; this.RuntimeClass = RuntimeClass; this.live = new Map(); this.locks = new Map();
-    this.db = new DatabaseSync(config.database);
+    this.db = openDatabase(config.database);
     this.external = new ExternalSessions(this);
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -65,7 +66,10 @@ export class Manager extends EventEmitter {
   // the user reviews from. Boot order is already serialized by runtime().
   async ensureParent(a) {
     const parent=this.parentFor(a.cwd);
-    if(this.db.prepare('SELECT seeded FROM parents WHERE cwd=?').get(a.cwd).seeded)return parent;
+    // The cache belongs to the bridge database, not the selected DSH home.
+    // Desktop provider reuse can switch homes while retaining this database.
+    // Recheck the idempotent mount point in the active persistence store.
+    if(!this.config.revalidateParents && this.db.prepare('SELECT seeded FROM parents WHERE cwd=?').get(a.cwd).seeded)return parent;
     const rt=new this.RuntimeClass({id:parent,cwd:a.cwd,preset:a.preset},this.config);
     try {
       await rt.request('initialize',{cwd:a.cwd,provider:a.provider,model:a.model,reasoningEffort:a.effort,permission:a.permission,preset:a.preset,resume:false});
@@ -154,6 +158,7 @@ export class Manager extends EventEmitter {
     return this.serial('workspace-registration',()=>this.bootRuntime(a));
   }
   async bootRuntime(a) {
+    validateAgentWorkspace(this.config,a);
     if(this.live.has(a.id))return this.live.get(a.id);
     const parent=await this.ensureParent(a);
     const rt=new this.RuntimeClass(a,this.config); this.live.set(a.id,rt);
@@ -216,9 +221,10 @@ export class Manager extends EventEmitter {
       if(p.status==='idle') this.release(id).catch(e=>this.event(id,'runtime/release-error',{message:e.message}));
     }
   }
-  async start({task,cwd,name,model='deepseek-flash',provider='deepseek-official',effort='max',permission='workspace-write',preset='standard'}) {
+  async start({task,cwd,name,model=this.config.defaultModel??'deepseek-flash',provider=this.config.defaultProvider??'deepseek-official',effort=this.config.defaultEffort??'max',permission='workspace-write',preset='standard'}, {threadId}={}) {
     if(!isAbsolute(cwd)||!statSync(cwd).isDirectory())throw new Error('cwd must be an existing absolute directory');
-    const a={id:randomUUID(),name:name?.trim()||titleFromTask(task),cwd,model,provider,effort,permission,preset,status:'starting',created_at:new Date().toISOString(),answer:'',partial_text:'',persisted:false};
+    const workspace=isolationEnabled(this.config)?prepareWorkspace(this.config,{cwd,threadId,permission}):{cwd,source_cwd:cwd,workspace_mode:'shared',...(threadId?{parent_thread_id:threadId}:{})};
+    const a={id:randomUUID(),name:name?.trim()||titleFromTask(task),...workspace,model,provider,effort,permission,preset,status:'starting',created_at:new Date().toISOString(),answer:'',partial_text:'',persisted:false};
     this.save(a);
     // Return the ID immediately. Boot and prompt errors remain observable by status.
     this.serial(a.id,()=>this.submit(a.id,task)).catch(e=>{const b=this.get(a.id);b.status='error';b.error=e.message;this.save(b);this.event(a.id,'error',{message:e.message});});
@@ -226,19 +232,22 @@ export class Manager extends EventEmitter {
   }
   async submit(id,task) {
     let a=this.get(id);
+    validateAgentWorkspace(this.config,a);
     a.status='starting';a.answer='';a.partial_text='';a.finish_reason=null;a.error=null;this.save(a);
     let rt;
     try {rt=await this.runtime(a);} catch(e) {a=this.get(id);a.status='error';a.error=e.message;this.save(a);throw e;}
     a=this.get(id);a.status='running';this.save(a);
     let receipt;
-    try {receipt=await rt.request('session/prompt',{sessionId:id,contentBlocks:[{type:'text',text:task}]});}
+    try {receipt=await rt.request('session/prompt',{sessionId:id,contentBlocks:[{type:'text',text:isolatedPrompt(a,task)}]});}
     catch(e){a=this.get(id);a.status='error';a.error=e.message;this.save(a);try{await rt.close();}finally{this.live.delete(id);}throw e;}
     a=this.get(id);a.persisted=true;a.message_id=receipt.messageId;this.save(a);
     this.event(id,'bridge/prompt',{message_id:receipt.messageId,task});
     return a;
   }
-  followup(id,task) {return this.serial(id,async()=>{
+  assertOwner(id,threadId) {assertWorkspaceOwner(this.config,this.get(id),threadId);}
+  followup(id,task,{threadId}={}) {return this.serial(id,async()=>{
     const a=this.get(id);
+    assertWorkspaceOwner(this.config,a,threadId);
     if(a.external)return this.external.send(id,task,'queue',true);
     if(a.status==='closed')throw new Error('Agent is closed');
     if(['running','starting','interrupting'].includes(a.status))throw new Error('Agent is busy; interrupt it before redirecting, or wait until idle.');

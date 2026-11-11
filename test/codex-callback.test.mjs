@@ -43,6 +43,12 @@ test('RPC rejection is reported without another delivery',async t=>{
   assert.equal(f.calls.filter(x=>x.method==='turn/start').length,1);
 });
 
+test('preflight rejects another parent without submitting a turn',async t=>{
+  const f=await fixture(t,(socket,request)=>socket.send(JSON.stringify({id:request.id,result:{thread:{id:'another-parent',status:{type:'idle'}}}})));
+  await assert.rejects(codexCallback({threadId:'parent',check:true,endpoint:f.endpoint}),/different parent thread/);
+  assert.equal(f.calls.some(x=>x.method==='turn/start'),false);
+});
+
 test('lost delivery acknowledgement does not cause a retry',async t=>{
   const f=await fixture(t,()=>{});
   await assert.rejects(codexCallback({threadId:'parent',output:{},endpoint:f.endpoint},{timeoutMs:100}),/delivery may have occurred/);

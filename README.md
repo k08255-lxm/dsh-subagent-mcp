@@ -1,3 +1,5 @@
+Experimental Codex desktop profile: [setup and limitations](docs/codex-desktop.md). Uses standard MCP waits; no native idle wakeup or desktop E2E claim.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/dqtz5vpvj9-create/dsh-subagent-mcp/main/docs/assets/readme-hero.png?v=0.5.3" alt="DSH Subagent MCP — Give Codex a DeepSeek crew. Blue-haired whale-girl agents write code, investigate, and test beside the Codex terminal emblem." width="1200">
 </p>
